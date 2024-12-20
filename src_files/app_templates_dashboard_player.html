@@ -1,0 +1,559 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!--
+===============================
+ATHLETE SEARCH SECTION
+===============================
+-->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Athlete Search</h5>
+                <select id="athleteSelect" class="form-select" style="width: 100%">
+                    <option value="">Search for an athlete...</option>
+                    {% for athlete in users %}
+                    <option value="{{ athlete.id }}" {% if user and user.id == athlete.id %}selected{% endif %}>
+                        {{ athlete.lastname }}, {{ athlete.firstname }}
+                        {% if athlete.school %} - {{ athlete.school }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if not user %}
+<!--
+===============================
+WELCOME MESSAGE (No Athlete Selected)
+===============================
+-->
+<div class="row">
+    <div class="col">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <h2 class="mb-4">Welcome to Baseball Analytics</h2>
+                <p class="lead mb-4">Search for an athlete above to view their performance data and analytics.</p>
+                <p class="text-muted">
+                    Start typing a name to see matching athletes. Select an athlete to view their detailed statistics,
+                    including exit velocity trends, session history, and more.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<!--
+===============================
+ATHLETE DASHBOARD CONTENT
+===============================
+-->
+<!-- Player Header & Filters -->
+<div class="row mb-4">
+    <div class="col">
+        <h1 class="user-name mb-3">{{ user.firstname }} {{ user.lastname }}</h1>
+        
+        <!-- Date and Speed Filters -->
+        <div class="filter-section">
+            <form id="filterForm" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Date Range</label>
+                    <input type="date" class="form-control" id="dateFrom" name="date_from" value="{{ filters.date_from }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <input type="date" class="form-control" id="dateTo" name="date_to" value="{{ filters.date_to }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Min Pitch Speed (MPH)</label>
+                    <input type="number" class="form-control" id="minPitchSpeed" name="min_pitch_speed" 
+                           value="{{ filters.min_pitch_speed }}" step="0.1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Max Pitch Speed (MPH)</label>
+                    <input type="number" class="form-control" id="maxPitchSpeed" name="max_pitch_speed"
+                           value="{{ filters.max_pitch_speed }}" step="0.1">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!--
+===============================
+SUMMARY STATISTICS CARDS
+===============================
+-->
+<div class="row mb-4">
+    <!-- Total Sessions Card -->
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="card-body">
+                <h5 class="card-title">Total Sessions</h5>
+                <h2 class="card-text">{{ sessions|length }}</h2>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Total Hits Card -->
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="card-body">
+                <h5 class="card-title">Total Hits</h5>
+                <h2 class="card-text">{{ sessions|sum(attribute='hitcount') }}</h2>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Average Exit Velocity Card -->
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="card-body">
+                <h5 class="card-title">Avg Exit Velocity</h5>
+                <h2 class="card-text">
+                    {% set exit_velos = sessions|selectattr('avgexitvel')|list %}
+                    {% if exit_velos %}
+                        {{ "%.1f"|format(exit_velos|sum(attribute='avgexitvel') / exit_velos|length) }} mph
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </h2>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Maximum Exit Velocity Card -->
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="card-body">
+                <h5 class="card-title">Max Exit Velocity</h5>
+                <h2 class="card-text">
+                    {% set max_exit = sessions|selectattr('maxexitvel')|map(attribute='maxexitvel')|max|default(0) %}
+                    {% if max_exit > 0 %}
+                        {{ "%.1f"|format(max_exit) }} mph
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+===============================
+EXIT VELOCITY TREND CHART
+===============================
+-->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Exit Velocity Trend</h5>
+                <div id="exitVeloChart" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+===============================
+PERFORMANCE ANALYSIS SECTION
+===============================
+-->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Performance Analysis</h5>
+                <!-- Time Period Selectors -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label">Select Time Period</label>
+                        <select class="form-select" id="intervalSelect">
+                            <option value="7">Last 7 Days</option>
+                            <option value="14">Last 14 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="180">Last 6 Months</option>
+                            <option value="365">Last 12 Months</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Compare With (Optional)</label>
+                        <select class="form-select" id="compareSelect">
+                            <option value="">No Comparison</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="14">Last 14 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="180">Last 6 Months</option>
+                            <option value="365">Last 12 Months</option>
+                        </select>
+                    </div>
+                </div>
+                <!-- Stats Comparison Table -->
+                <div id="statsTable"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+===============================
+DETAILED SESSIONS TABLE
+===============================
+-->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Batting Sessions</h5>
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Hits</th>
+                                <th>Avg Exit Velo</th>
+                                <th>Max Exit Velo</th>
+                                <th>Avg Distance</th>
+                                <th>Max Distance</th>
+                                <th>Singles</th>
+                                <th>Doubles</th>
+                                <th>Triples</th>
+                                <th>Home Runs</th>
+                                <th>Batting Avg</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for session in sessions %}
+                            <tr>
+                                <td>{{ session.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{{ session.hitcount }}</td>
+                                <td>{{ "%.1f"|format(session.avgexitvel) if session.avgexitvel else 'N/A' }}</td>
+                                <td>{{ "%.1f"|format(session.maxexitvel) if session.maxexitvel else 'N/A' }}</td>
+                                <td>{{ "%.0f"|format(session.avgdistance) if session.avgdistance else 'N/A' }}</td>
+                                <td>{{ "%.0f"|format(session.maxdistance) if session.maxdistance else 'N/A' }}</td>
+                                <td>{{ session.singles }}</td>
+                                <td>{{ session.doubles }}</td>
+                                <td>{{ session.triples }}</td>
+                                <td>{{ session.homeruns }}</td>
+                                <td>{{ "%.3f"|format(session.avg) if session.avg else '.000' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+
+{% block scripts %}
+<!--
+===============================
+JAVASCRIPT SECTION
+===============================
+-->
+<script>
+$(document).ready(function() {
+    // Initialize Select2 for athlete search
+    $('#athleteSelect').select2({
+        theme: 'bootstrap-5',
+        placeholder: 'Search for an athlete...',
+        allowClear: true,
+        minimumInputLength: 2
+    });
+    
+    // Handle athlete selection changes
+    $('#athleteSelect').on('change', function() {
+        const userId = $(this).val();
+        if (userId) {
+            window.location.href = `/dashboard/player/${userId}`;
+        } else {
+            window.location.href = '/dashboard/player';
+        }
+    });
+    
+    {% if user %}
+    // Handle filter form submission
+    $('#filterForm').on('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        const params = new URLSearchParams(formData);
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+    });
+    
+    /**
+     * Creates the exit velocity trend chart
+     */
+    function createExitVeloChart(data) {
+        if (!data || data.length === 0) {
+            document.getElementById('exitVeloChart').innerHTML = 
+                '<div class="alert alert-info m-3">No exit velocity data available for the selected date range.</div>';
+            return;
+        }
+    
+        const trace1 = {
+            x: data.map(d => d.date),
+            y: data.map(d => d.exit_velo),
+            name: 'Exit Velocity',
+            type: 'scatter',
+            mode: 'markers',
+            marker: {
+                size: 6,
+                color: 'rgba(31, 119, 180, 0.5)'
+            }
+        };
+        
+        const trace2 = {
+            x: data.map(d => d.date),
+            y: data.map(d => d.ema),
+            name: 'EMA (50 hits)',
+            type: 'scatter',
+            mode: 'lines',
+            line: {
+                color: 'rgb(255, 127, 14)',
+                width: 2
+            }
+        };
+    
+        const trace3 = {
+            x: data.map(d => d.date),
+            y: data.map(d => d.trend_line),
+            name: 'Overall Trend',
+            type: 'scatter',
+            mode: 'lines',
+            line: {
+                color: 'rgb(44, 160, 44)',
+                width: 2,
+                dash: 'dash'
+            }
+        };
+    
+        const trace4 = {
+            x: data.map(d => d.date),
+            y: data.map(d => d.monthly_avg),
+            name: 'Monthly Average',
+            type: 'scatter',
+            mode: 'lines+markers',
+            line: {
+                shape: 'hv',
+                color: 'rgb(214, 39, 40)',
+                width: 2
+            },
+            marker: {
+                size: 8,
+                symbol: 'diamond'
+            }
+        };
+    
+        const layout = {
+            margin: { t: 20, r: 20, b: 40, l: 40 },
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                y: -0.2
+            },
+            yaxis: {
+                title: 'Exit Velocity (mph)'
+            },
+            xaxis: {
+                title: 'Date',
+                tickangle: -45
+            },
+            hovermode: 'closest'
+        };
+    
+        Plotly.newPlot('exitVeloChart', [trace1, trace2, trace3, trace4], layout);
+    }
+
+    /**
+     * Formats the change values for the stats comparison table
+     */
+     function formatChange(improvement, key, unit) {
+        if (!improvement) return '';
+        
+        // Calculate the change (comparison minus selected)
+        const rawDiff = comparisonValue - primaryValue;
+        const rawPct = ((comparisonValue / primaryValue) - 1) * 100;
+        
+        // Format the difference
+        let diffStr;
+        if (key === 'batting_avg') {
+            diffStr = rawDiff.toFixed(3);
+        } else if (unit === ' mph' || unit === ' ft') {
+            diffStr = rawDiff.toFixed(1);
+        } else {
+            diffStr = rawDiff.toFixed(0);
+        }
+        
+        // Add sign
+        diffStr = rawDiff > 0 ? '+' + diffStr : diffStr;
+        
+        // Format percentage with sign
+        const pctStr = rawPct > 0 ? '+' + rawPct.toFixed(1) : rawPct.toFixed(1);
+        
+        return `${diffStr}${unit} (${pctStr}%)`;
+    }
+    
+    
+    /**
+     * Updates the stats comparison table
+     */
+     function updateStats() {
+        const intervalValue = $('#intervalSelect').val();
+        const compareValue = $('#compareSelect').val();
+        
+        let url = `/api/player/{{ user.id }}/interval-stats?interval=${intervalValue}`;
+        if (compareValue) {
+            url += `&compare_to=${compareValue}`;
+        }
+        
+        fetch(url)
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Received data:', data);
+                if (data.primary_stats) {
+                    let html = `
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Metric</th>
+                                    <th class="text-end">Selected Period</th>
+                                    ${data.comparison_stats ? `
+                                        <th class="text-end">Comparison Period</th>
+                                        <th class="text-end">Change</th>
+                                    ` : ''}
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                    
+                    const metrics = [
+                        ['Total Hits', 'total_hits', ''],
+                        ['Avg Exit Velo', 'avg_exit_velo', ' mph'],
+                        ['Max Exit Velo', 'max_exit_velo', ' mph'],
+                        ['Avg Distance', 'avg_distance', ' ft'],
+                        ['Max Distance', 'max_distance', ' ft'],
+                        ['Singles', 'singles', ''],
+                        ['Doubles', 'doubles', ''],
+                        ['Triples', 'triples', ''],
+                        ['Home Runs', 'home_runs', ''],
+                        ['Batting Avg', 'batting_avg', '']
+                    ];
+                    
+                    metrics.forEach(([label, key, unit]) => {
+                        const primaryValue = data.primary_stats[key];
+                        const comparisonValue = data.comparison_stats ? data.comparison_stats[key] : null;
+                        
+                        // Format primary value based on the metric type
+                        let formattedPrimaryValue;
+                        if (key === 'batting_avg') {
+                            formattedPrimaryValue = primaryValue.toFixed(3);
+                        } else if (unit === ' mph' || unit === ' ft') {
+                            formattedPrimaryValue = primaryValue.toFixed(1);
+                        } else {
+                            formattedPrimaryValue = primaryValue.toFixed(0);
+                        }
+                        
+                        // Format comparison value
+                        let formattedComparisonValue;
+                        if (comparisonValue !== null) {
+                            if (key === 'batting_avg') {
+                                formattedComparisonValue = comparisonValue.toFixed(3);
+                            } else if (unit === ' mph' || unit === ' ft') {
+                                formattedComparisonValue = comparisonValue.toFixed(1);
+                            } else {
+                                formattedComparisonValue = comparisonValue.toFixed(0);
+                            }
+                        }
+                        
+                        html += `
+                            <tr>
+                                <td>${label}</td>
+                                <td class="text-end">${formattedPrimaryValue}${unit}</td>`;
+                        
+                        // In the table generation
+                        if (data.comparison_stats) {
+                            const improvement = data.improvements[key];
+                            const changeClass = comparisonValue > primaryValue ? 'text-success' : 'text-danger';
+                            
+                            html += `
+                                <td class="text-end">${formattedComparisonValue}${unit}</td>
+                                <td class="text-end ${changeClass}">
+                                    ${formatChange(improvement, key, unit)}
+                                </td>`;
+                        }
+                                                
+                        html += '</tr>';
+                    });
+                    
+                    html += '</tbody></table>';
+                    $('#statsTable').html(html);
+                } else {
+                    $('#statsTable').html('<div class="alert alert-warning">No data available for the selected period.</div>');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                $('#statsTable').html('<div class="alert alert-danger">Error loading stats.</div>');
+            });
+    }
+    
+    // Helper function to format the change value
+    function formatChange(improvement, key, unit) {
+        if (!improvement) return '';
+        
+        const diff = improvement.diff;
+        const pct = improvement.pct;
+        
+        // Format the difference based on the metric type
+        let diffStr = diff > 0 ? '+' : '';
+        if (key === 'batting_avg') {
+            diffStr += Math.abs(diff).toFixed(3);
+        } else if (unit === ' mph' || unit === ' ft') {
+            diffStr += Math.abs(diff).toFixed(1);
+        } else {
+            diffStr += Math.abs(diff).toFixed(0);
+        }
+        
+        // Format the percentage
+        const pctStr = (pct > 0 ? '+' : '') + pct.toFixed(1);
+        
+        return `${diffStr}${unit} (${pctStr}%)`;
+    }
+    
+    // Initialize the stats component
+    $(document).ready(function() {
+        // Set default selections
+        $('#intervalSelect').val('7');  // Last 7 days
+        $('#compareSelect').val('30');  // Compare with last 30 days
+        
+        // Set up event handlers
+        $('#intervalSelect, #compareSelect').on('change', updateStats);
+        updateStats(); // Initial load
+    });
+
+    // Load exit velocity data
+    fetch(`/api/player/{{ user.id }}/exit-velo-trend${window.location.search}`)
+        .then(response => response.json())
+        .then(data => createExitVeloChart(data));
+    {% endif %}
+});
+</script>
+{% endblock %}
